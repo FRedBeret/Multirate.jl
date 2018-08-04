@@ -48,27 +48,21 @@ function filt!{Tb,Th,Tx}( buffer::AbstractMatrix{Tb}, kernel::Channelizer{Th}, x
         kernel.history = [ zeros(Tx, tapsPer𝜙-1) for i in 1:Nchannels ]
     end
 
-    𝜙Idx         = Nchannels
-    xIdx         = 1
-    rowIdx       = 1
-
-    while xIdx <= bufLen
-        history = kernel.history[𝜙Idx]
-
-        if xIdx < tapsPer𝜙
-            fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, history, xPartitioned[𝜙Idx], xIdx )
-        else
-            fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, xPartitioned[𝜙Idx], xIdx )
+    for xIdx in 1:bufLen
+        for 𝜙Idx in Nchannels:-1:1
+            if xIdx < tapsPer𝜙
+                fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, kernel.history[𝜙Idx], xPartitioned[𝜙Idx], xIdx )
+            else
+                fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, xPartitioned[𝜙Idx], xIdx )
+            end
         end
 
-        𝜙Idx -= 1
+        buffer[xIdx,:] = fftshift(ifft(fftBuffer))
+    end
 
-        if 𝜙Idx == 0
-            buffer[rowIdx,:] = fftshift(ifft(fftBuffer))
-            𝜙Idx             = Nchannels
-            rowIdx          += 1
-            xIdx            += 1
-        end
+    # set history for next call
+    for 𝜙Idx in 1:Nchannels
+        kernel.history[𝜙Idx] = shiftin!( kernel.history[𝜙Idx], xPartitioned[𝜙Idx] )
     end
 
     return buffer

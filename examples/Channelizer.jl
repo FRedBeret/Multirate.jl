@@ -53,12 +53,29 @@ function channelizerplots( signal::Vector, channelizedSignals::Matrix )
     return table
 end
 
+function segments(n; alpha=0.5)
+    s0 = 1
+    n0 = n
+    segs = []
+    
+    while n > 0
+        s=min(n, round(Int, alpha*rand()*n0))
+        
+        if s > 0
+            push!(segs, s0:s0+s-1)
+            n -= s
+            s0 += s
+        end
+    end
+    
+    return segs
+end
 
 Tx = Complex128 # Datatype for x
 ƒs = 1.0        # Input sample rate
 
-Nchannels = 7
-samplesPerChannel = 850
+Nchannels = 10
+samplesPerChannel = 2000
 
 # Construct a linear chirp signal from ƒ = -0.5 to -0.5
 n                   = Nchannels * samplesPerChannel
@@ -71,9 +88,16 @@ signal            += wgn( n, power=0.1)
 
 # Instantiate a channelizer with Nchannels
 channelizer        = Channelizer( Nchannels, 32 )
-channelizedSignals = filt( channelizer, signal )
 
-# # Create the table of plots
+# channelizedSignals = filt( channelizer, signal )
+channelizedSignals = Array{Tx}(0, Nchannels)
+for segment in segments(samplesPerChannel)
+    expandedSegment = (segment.start-1)*Nchannels+1 : segment.stop*Nchannels
+    @printf("Channelizing segment %s as %s\n", segment, expandedSegment)
+    @time channelizedSignals = [channelizedSignals; filt( channelizer, signal[expandedSegment] )]
+end
+
+# Create the table of plots
 table = channelizerplots( signal, channelizedSignals )
 
 winOpen = [true]
