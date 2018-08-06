@@ -1,31 +1,31 @@
 import Multirate: PFB, taps2pfb
 
 # Interpolator FIR kernel
-type Channelizer{T}
-    pfb::PFB{T}
-    h::Vector{T}
+type Channelizer{Th,Tx}
+    pfb::PFB{Th}
+    h::Vector{Th}
     Nchannels::Int
     tapsPer𝜙::Int
-    history::AbstractArray
+    history::Array{Array{Tx}}
 end
 
-function Channelizer( h::Vector, Nchannels::Integer )
+function Channelizer{Th}( Tx, h::Vector{Th}, Nchannels::Integer )
     pfb       = taps2pfb( h, Nchannels )
     Nchannels = size( pfb )[2]
     tapsPer𝜙  = size( pfb )[1]
-    Channelizer( pfb, h, Nchannels, tapsPer𝜙, [] )
+    Channelizer{Th, Tx}( pfb, h, Nchannels, tapsPer𝜙, [] )
 end
 
-function Channelizer( Nchannels::Integer, tapsPer𝜙 = 20 )
+function Channelizer( Th, Tx, Nchannels::Integer, tapsPer𝜙 = 20 )
     hLen = tapsPer𝜙 * Nchannels
     h    = firdes( hLen, 0.45/Nchannels, kaiser ) .* Nchannels
-    Channelizer( h, Nchannels )
+    Channelizer( Tx, Array{Th}(h), Nchannels )
 end
 
 
 
 
-function filt!{Tb,Th,Tx}( buffer::AbstractMatrix{Tb}, kernel::Channelizer{Th}, x::AbstractVector{Tx} )
+function filt!{Tb,Th,Tx}( buffer::Matrix{Tb}, kernel::Channelizer{Th}, x::AbstractVector{Tx} )
     Nchannels         = kernel.Nchannels
     pfb               = kernel.pfb
     tapsPer𝜙          = kernel.tapsPer𝜙
@@ -48,27 +48,27 @@ function filt!{Tb,Th,Tx}( buffer::AbstractMatrix{Tb}, kernel::Channelizer{Th}, x
         kernel.history = [ zeros(Tx, tapsPer𝜙-1) for i in 1:Nchannels ]
     end
 
-    for xIdx in 1:bufLen
-        for 𝜙Idx in Nchannels:-1:1
+    @simd for xIdx in 1:bufLen
+        @simd for 𝜙Idx in Nchannels:-1:1
             if xIdx < tapsPer𝜙
-                fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, kernel.history[𝜙Idx], xPartitioned[𝜙Idx], xIdx )
+                @inbounds fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, kernel.history[𝜙Idx], xPartitioned[𝜙Idx], xIdx )
             else
-                fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, xPartitioned[𝜙Idx], xIdx )
+                @inbounds fftBuffer[𝜙Idx] = unsafedot( pfb, 𝜙Idx, xPartitioned[𝜙Idx], xIdx )
             end
         end
 
-        buffer[xIdx,:] = fftshift(ifft(fftBuffer))
+        @inbounds buffer[xIdx,:] = fftshift(ifft(fftBuffer))
     end
 
     # set history for next call
-    for 𝜙Idx in 1:Nchannels
-        kernel.history[𝜙Idx] = shiftin!( kernel.history[𝜙Idx], xPartitioned[𝜙Idx] )
+    @simd for 𝜙Idx in 1:Nchannels
+        @inbounds kernel.history[𝜙Idx] = shiftin!( kernel.history[𝜙Idx], xPartitioned[𝜙Idx] )
     end
 
     return buffer
 end
 
-function filt{Th,Tx}( kernel::Channelizer{Th}, x::AbstractVector{Tx} )
+function filt{Th,Tx}( kernel::Channelizer{Th,Tx}, x::AbstractVector{Tx} )
     xLen   = length( x )
 
     @assert xLen % kernel.Nchannels == 0
